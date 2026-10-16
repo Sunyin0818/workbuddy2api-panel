@@ -612,7 +612,6 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		TokenUsage:               e.tokenUsage,
 		LastSuccessTime:          e.lastSuccess,
 		LastErrTime:              e.lastErr,
-		Until:                    e.until,
 		SoftStreak:               e.softStreak,
 		ModelCosts:               p.modelCostsStatusLocked(e, now),
 		ConsecutiveFails:         e.consecutiveFails,
@@ -626,6 +625,11 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 	// 「不碰 until/coolKind，那些是即时冷却，各自到期」）。无条件透出会让
 	// 面板把过期数天的「429 rate limit」与「可用」并排展示，运维无法判断
 	// 是历史残留还是当前限流。禁用原因仍由 DisabledReason 透出。
+	//
+	// Until 同口径：只在仍未到期时透出，避免面板/调用方把历史 until 当成本次冷却。
+	if now.Before(e.until) {
+		st.Until = e.until
+	}
 	if st.Cooling || st.Disabled {
 		st.Reason = e.reason
 	}
