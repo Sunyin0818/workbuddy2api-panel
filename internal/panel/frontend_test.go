@@ -1519,3 +1519,16 @@ process.stdout.write(JSON.stringify({
 	}
 }
 
+// 静态资源必须带 no-cache：前端随二进制发布，浏览器复用旧 app.js 会让新页面里的
+// 按钮没有事件绑定（表现为「点了没反应」）。
+func TestPanelStaticNoCacheHeaders(t *testing.T) {
+	p := newTestPanel()
+	for _, path := range []string{"/panel/", "/panel/app.js", "/panel/mobile.css", "/panel/mobile.js"} {
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-cache") {
+			t.Fatalf("%s Cache-Control=%q，应含 no-cache（防升级后浏览器复用旧 app.js）", path, got)
+		}
+	}
+}
+
