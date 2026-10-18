@@ -1,0 +1,16 @@
+services:
+  wb2api:
+    image: workbuddy2api:latest
+    container_name: workbuddy2api
+    restart: unless-stopped
+    # 以宿主机用户运行，避免容器内 app(uid 10001) 对挂载目录无写权限
+    user: "0:0"
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "7863:7863"
+    volumes:
+      # :z 为 Fedora SELinux 必需，重标记卷标签使容器可访问
+      - ./config.json:/app/config.json:rw,z
+      - ./auths:/app/auths:rw,z
+      - ./data:/app/data:rw,z
