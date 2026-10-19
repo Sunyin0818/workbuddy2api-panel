@@ -147,7 +147,17 @@ jobs:
       - name: 上一版 tag（compare 链接用）
         id: prev
         run: |
-          PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          # 只在「确实是当前 tag 祖先」的 tag 里取版本号最近的一个。
+          # 历史被重写（force push）后旧 tag 可能不在祖先链上，此时
+          # git describe 会跳到很久以前的 tag，把变更日志拉成十几个版本。
+          PREV=""
+          for t in $(git tag --list 'v*' --sort=-v:refname); do
+            [ "$t" = "$GITHUB_REF_NAME" ] && continue
+            if git merge-base --is-ancestor "$t" "${GITHUB_REF_NAME}^" 2>/dev/null; then
+              PREV="$t"
+              break
+            fi
+          done
           echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
       - name: 生成本版变更日志（相对上一 tag 的提交列表）
         id: notes
@@ -160,10 +170,15 @@ jobs:
             if [ -n "$PREV" ]; then
               echo "### 本版变更"
               echo
-              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME"
+              # 最多 30 条：正常一版只有几条，超出说明 tag 关系异常，不再无限拉长
+              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" | head -30
               echo
               echo "完整变更：https://github.com/${{ github.repository }}/compare/$PREV...$GITHUB_REF_NAME"
             else
+              echo "### 本版变更"
+              echo
+              git log --no-merges --pretty='- %s' -n 10 "$GITHUB_REF_NAME"
+              echo
               echo "完整变更：https://github.com/${{ github.repository }}/releases/tag/$GITHUB_REF_NAME"
             fi
             echo "RELEASE_BODY_EOF"
