@@ -1,4 +1,4 @@
-name: go-binaries
+name: ci
 
 # CI：只跑 vet + 测试，不构建产物、不发布 Release / 镜像。
 #   - push main / PR / 手动触发 → go vet + go test
@@ -14,7 +14,7 @@ on:
       - "cmd/**"
       - "internal/**"
       - "config.example.json"
-      - ".github/workflows/go-binaries.yml"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "go.mod"
@@ -22,7 +22,7 @@ on:
       - "cmd/**"
       - "internal/**"
       - "config.example.json"
-      - ".github/workflows/go-binaries.yml"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 concurrency:
