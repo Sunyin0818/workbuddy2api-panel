@@ -935,7 +935,7 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 - **CI 产物**：推送 `v*` tag 后，GitHub Actions 构建五平台二进制 + `checksums.txt` 并发布 Release；**不通过 Actions 发布 Docker 镜像**，镜像一律用 `docker compose build` / `podman build` 本地构建
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
-- **版本线只认本仓库**：tag 从本仓已有版本递增（当前 `v1.13.0`，下一版 `v1.13.1`），不沿用社区 fork 的 `v1.14`–`v1.16.x`；Release 变更日志只统计当前 tag 的祖先 tag 到本 tag 之间的提交
+- **版本线只认本仓库**：tag 从本仓已有版本递增（当前 `v1.13.1`，下一版 `v1.13.2`），不沿用社区 fork 的 `v1.14`–`v1.16.x`；Release 变更日志只统计当前 tag 的祖先 tag 到本 tag 之间的提交
 - **校验和范围**：Release 的 `checksums.txt` 覆盖二进制压缩包；本地构建的镜像不签名、不附 SBOM，部署时以本机构建产物为准
 - 上游 CodeBuddy 属腾讯系商业产品，本项目是其**非官方 OpenAI 兼容网关**；使用其账号做 API 网关涉及目标平台服务条款与账号风险，作者不对账号封禁、条款违约或使用结果负责
 
