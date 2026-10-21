@@ -171,7 +171,7 @@ jobs:
               echo "### 本版变更"
               echo
               # 最多 30 条：正常一版只有几条，超出说明 tag 关系异常，不再无限拉长
-              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" | head -30
+              git log --no-merges --pretty='- %s' -n 30 "$PREV..$GITHUB_REF_NAME"
               echo
               echo "完整变更：https://github.com/${{ github.repository }}/compare/$PREV...$GITHUB_REF_NAME"
             else

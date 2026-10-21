@@ -255,7 +255,7 @@ mkdir -p auths data && cp config.example.json config.json
 docker run -d --name workbuddy2api \
   -p 7863:7863 -e TZ=Asia/Shanghai \
   -v ./auths:/app/auths -v ./data:/app/data -v ./config.json:/app/config.json \
-  ghcr.io/linguo2625469/workbuddy2api-panel:latest
+  ghcr.io/sunyin0818/workbuddy2api-panel:latest
 
 # 3. 健康检查（无可用账号时返回 503）
 curl -s http://localhost:7863/healthz
@@ -266,6 +266,10 @@ curl -s http://localhost:7863/healthz
 >
 > 镜像 tag 规则：`main` 分支推送 `latest` / `main` / `sha-xxxxxx`；打 `v*` tag 额外发布
 > `1.2.3` / `1.2` / `1` 语义化版本；PR 仅构建验证、不推送。
+>
+> **版本线只认本仓库**：tag 从本仓已有版本递增（当前 `v1.13.0`，下一版 `v1.13.1`），
+> 不沿用社区 fork 的 `v1.14`–`v1.16.x`；Release 变更日志只统计**当前 tag 的祖先 tag**
+> 到本 tag 之间的提交。
 
 ### 方式一：Docker Compose（推荐服务器部署）
 
@@ -955,9 +959,9 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 ### 3. 发布来源与合规边界
 
-- **无预编译 release**：仓库无 Release / tag，产物 = 源码自构建（Dockerfile 多阶段在本地构建时完成）
+- **CI 产物与本地构建并存**：推送 `v*` tag 后，GitHub Actions 构建五平台二进制 + `checksums.txt` 并发布 Release，同时推送多架构镜像到 GHCR；也可始终用 `docker compose build` / `go build` 本地自构建
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
-- **无产物校验和**：`go.sum` 仅约束 Go 模块依赖；Docker 镜像由本地 `docker compose build` 生成，未引用第三方镜像
+- **校验和与信任边界**：Release 的 `checksums.txt` 覆盖二进制压缩包；GHCR 镜像未签名、未附 SBOM/provenance（workflow 显式 `provenance: false`），生产环境建议按 digest 固定，或直接本地构建
 - 上游 CodeBuddy 属腾讯系商业产品，本项目是其**非官方 OpenAI 兼容网关**；使用其账号做 API 网关涉及目标平台服务条款与账号风险，作者不对账号封禁、条款违约或使用结果负责
 
 ### 4. 授权使用边界
