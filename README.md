@@ -251,10 +251,13 @@ cd workbuddy2api-panel
 
 # 2. 准备配置（compose 挂载此文件，缺失会导致容器启动失败）
 cp config.example.json config.json
-#    建议编辑 config.json 设置 api_key（或留空由程序自动生成随机密钥）
+#    必须把 api_key 从 test_key 改成随机长串；留空 = 不鉴权（仅限本机回环使用）
 
 # 3. 启动（首次会构建镜像，约 1-2 分钟）
 docker compose up -d --build
+
+# Fedora/Podman（rootless，SELinux 卷标签已在 podman-compose.yml 处理）：
+# podman-compose -f podman-compose.yml up -d --build
 
 # 4. 健康检查（无可用账号时返回 503）
 curl -s http://localhost:7863/healthz

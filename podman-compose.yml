@@ -1,5 +1,6 @@
 services:
   wb2api:
+    build: .
     image: workbuddy2api:latest
     container_name: workbuddy2api
     restart: unless-stopped
