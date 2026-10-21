@@ -1,8 +1,7 @@
 name: go-binaries
 
-# 可运行二进制构建验证（不发布）：
-#   - PR / 手动触发 → 测试 + 五平台编译验证（产物仅存 artifact）
-#   - push main     → 仅测试（跨平台编译在 PR/手动时验证）
+# CI：只跑 vet + 测试，不构建产物、不发布 Release / 镜像。
+#   - push main / PR / 手动触发 → go vet + go test
 #
 # 版本号约定：cmd/server/main.go 的 appVersion 是唯一版本源；v* tag 仅作版本标记，
 # 不触发 CI、不创建 Release、不发布镜像。
@@ -47,68 +46,4 @@ jobs:
       - run: go vet ./...
       - run: go test ./... -count=1
 
-  build:
-    needs: test
-    # main 分支 push 只跑 test：跨平台编译在 PR 与手动触发时验证，
-    # 省掉每次 main push 的 5 个矩阵 job。
-    if: github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: windows, goarch: amd64, ext: .zip }
-          - { goos: linux, goarch: amd64, ext: .tar.gz }
-          - { goos: linux, goarch: arm64, ext: .tar.gz }
-          - { goos: darwin, goarch: amd64, ext: .tar.gz }
-          - { goos: darwin, goarch: arm64, ext: .tar.gz }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: 取源码版本号
-        id: ver
-        run: echo "v=$(grep -oP 'appVersion = "\K[^"]+' cmd/server/main.go)" >> "$GITHUB_OUTPUT"
-
-      - name: 构建（剥离符号，对齐本地发布口径）
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: go build -ldflags "-s -w" -o "wb2api${{ matrix.goos == 'windows' && '.exe' || '' }}" ./cmd/server
-
-      # 版本串断言：二进制必须含源码 appVersion（防交叉编译矩阵里编错树/漏 ldflags）
-      - name: 断言二进制版本串
-        run: |
-          BIN="wb2api${{ matrix.goos == 'windows' && '.exe' || '' }}"
-          if ! grep -qa "${{ steps.ver.outputs.v }}" "$BIN"; then
-            echo "::error::binary missing version string ${{ steps.ver.outputs.v }}"
-            exit 1
-          fi
-          echo "version assert OK: ${{ steps.ver.outputs.v }}"
-
-      - name: 打包（windows=zip 三件套，其余=tar.gz）
-        run: |
-          V="${{ steps.ver.outputs.v }}"
-          V="${V%-panel}"   # 文件名不带 -panel 后缀（wb2api-panel-v1.2.3-... 既有惯例）
-          case "${{ matrix.goos }}" in
-            windows)
-              NAME="wb2api-panel-v${V}-windows-amd64.zip"
-              zip -q "$NAME" wb2api.exe config.example.json README.md
-              ;;
-            *)
-              NAME="wb2api-panel-v${V}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
-              tar czf "$NAME" wb2api config.example.json README.md
-              ;;
-          esac
-          echo "name=$NAME" >> "$GITHUB_ENV"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.name }}
-          path: ${{ env.name }}
-          retention-days: 7
 

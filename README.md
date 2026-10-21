@@ -933,7 +933,7 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 ### 3. 发布来源与合规边界
 
-- **CI 只做验证**：main push / PR / 手动触发时运行 `go vet`、`go test` 与跨平台编译验证；**不发布 Release，也不发布 Docker 镜像**
+- **CI 只做验证**：main push / PR / 手动触发时运行 `go vet`、`go test`；**不构建二进制、不发布 Release，也不发布 Docker 镜像**
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
 - **版本线只认本仓库**：`v*` tag 仅作版本标记（不触发 CI），从本仓已有版本递增（当前 `v1.13.1`，下一版 `v1.13.2`），不沿用社区 fork 的 `v1.14`–`v1.16.x`
 - **校验和范围**：二进制与镜像均由本地构建，不提供预编译产物或签名
