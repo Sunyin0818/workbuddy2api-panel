@@ -242,40 +242,11 @@ flowchart LR
 - 一个或多个已注册的 CodeBuddy 账号，用于 OAuth 登录
 - 宿主机 Go ≥ 1.22（仅从源码构建时需要）
 
-### 方式〇：GHCR 镜像（免克隆免构建）
-
-CI 会自动构建多架构镜像（`amd64` / `arm64`）并发布到 GHCR，`git clone` 之外的部署路径：
-
-```bash
-# 1. 准备配置与数据目录
-mkdir -p auths data && cp config.example.json config.json
-#    建议编辑 config.json 设置 api_key（或留空由程序自动生成随机密钥）
-
-# 2. 拉取并运行
-docker run -d --name workbuddy2api \
-  -p 7863:7863 -e TZ=Asia/Shanghai \
-  -v ./auths:/app/auths -v ./data:/app/data -v ./config.json:/app/config.json \
-  ghcr.io/sunyin0818/workbuddy2api-panel:latest
-
-# 3. 健康检查（无可用账号时返回 503）
-curl -s http://localhost:7863/healthz
-```
-
-> **首次发布后须将包设为公开**：GitHub 仓库页 → Packages → `workbuddy2api-panel` →
-> Package settings → Change visibility → Public，否则拉取需要 `docker login ghcr.io`。
->
-> 镜像 tag 规则：`main` 分支推送 `latest` / `main` / `sha-xxxxxx`；打 `v*` tag 额外发布
-> `1.2.3` / `1.2` / `1` 语义化版本；PR 仅构建验证、不推送。
->
-> **版本线只认本仓库**：tag 从本仓已有版本递增（当前 `v1.13.0`，下一版 `v1.13.1`），
-> 不沿用社区 fork 的 `v1.14`–`v1.16.x`；Release 变更日志只统计**当前 tag 的祖先 tag**
-> 到本 tag 之间的提交。
-
 ### 方式一：Docker Compose（推荐服务器部署）
 
 ```bash
 # 1. 克隆
-git clone https://github.com/linguo2625469/workbuddy2api-panel.git
+git clone https://github.com/sunyin0818/workbuddy2api-panel.git
 cd workbuddy2api-panel
 
 # 2. 准备配置（compose 挂载此文件，缺失会导致容器启动失败）
@@ -959,9 +930,10 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 ### 3. 发布来源与合规边界
 
-- **CI 产物与本地构建并存**：推送 `v*` tag 后，GitHub Actions 构建五平台二进制 + `checksums.txt` 并发布 Release，同时推送多架构镜像到 GHCR；也可始终用 `docker compose build` / `go build` 本地自构建
+- **CI 产物**：推送 `v*` tag 后，GitHub Actions 构建五平台二进制 + `checksums.txt` 并发布 Release；**不通过 Actions 发布 Docker 镜像**，镜像一律用 `docker compose build` / `podman build` 本地构建
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
-- **校验和与信任边界**：Release 的 `checksums.txt` 覆盖二进制压缩包；GHCR 镜像未签名、未附 SBOM/provenance（workflow 显式 `provenance: false`），生产环境建议按 digest 固定，或直接本地构建
+- **版本线只认本仓库**：tag 从本仓已有版本递增（当前 `v1.13.0`，下一版 `v1.13.1`），不沿用社区 fork 的 `v1.14`–`v1.16.x`；Release 变更日志只统计当前 tag 的祖先 tag 到本 tag 之间的提交
+- **校验和范围**：Release 的 `checksums.txt` 覆盖二进制压缩包；本地构建的镜像不签名、不附 SBOM，部署时以本机构建产物为准
 - 上游 CodeBuddy 属腾讯系商业产品，本项目是其**非官方 OpenAI 兼容网关**；使用其账号做 API 网关涉及目标平台服务条款与账号风险，作者不对账号封禁、条款违约或使用结果负责
 
 ### 4. 授权使用边界
