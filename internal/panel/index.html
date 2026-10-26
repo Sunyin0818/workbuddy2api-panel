@@ -1347,7 +1347,10 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
       <div class="hint">该网关已启用 api_key 鉴权，请输入 config.json 中的密钥。</div>
     </header>
     <div class="body">
-      <form style="display:contents" onsubmit="return false"><input type="password" id="keyInput" placeholder="api_key" autocomplete="off"></form>
+      <!-- 密钥框刻意不包 <form>：内联事件处理器会被 CSP script-src 'self' 拦截并打印
+           「Executing inline event handler violates ...」，回车仍会真的提交表单整页重载
+           （输入被清空）。Enter 已由 app.js 的 keydown 监听接管。 -->
+      <input type="password" id="keyInput" placeholder="api_key" autocomplete="off">
       <div class="state err" id="keyErr" hidden style="margin-top:10px">密钥不正确，请重试。</div>
     </div>
     <footer>

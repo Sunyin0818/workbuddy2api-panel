@@ -1,6 +1,11 @@
 'use strict';
 /* ── 状态 ─────────────────────────────────────────────────────────── */
-const LS_KEY = 'wb2api.key', LS_THEME = 'wb2api.theme';
+/* LS_THEME 带 v2：旧键 wb2api.theme 里的值全部由两态实现写入（每次点击即存
+   light/dark），从来表达不了「跟随系统」；而 localStorage 按 origin 隔离，于是
+   同一台机器上「127.0.0.1 不跟随系统、localhost / 局域网 IP 跟随」——差异只可能
+   来自旧 origin 里那条被钉死的显式值。换键即一次性丢弃这批不可信的旧偏好，
+   所有 origin 回到 auto（用户再点一次就重新锁定，行为可解释）。 */
+const LS_KEY = 'wb2api.key', LS_THEME = 'wb2api.theme.v2';
 /* 账号备注与「积分到期提醒」折叠的本机键（同上：模块级声明放顶部，避开 TDZ）。 */
 const LS_REMARKS = 'wb2api.remarks.v1', LS_EXP_FOLD = 'wb2api.expfold.v1';
 let remarksCache = null;
