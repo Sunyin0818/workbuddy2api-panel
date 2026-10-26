@@ -384,6 +384,19 @@ func (c *Client) MarketExpertList(a *auth.Auth, expertType string) ([]MarketExpe
 	if expertType != "" {
 		body["expert_type"] = expertType
 	}
+	return c.marketExpertQuery(a, body)
+}
+
+// MarketExpertSearch 按关键词搜索专家市场（expert_use_* 等「点名专家」任务用：
+// 任务页 deeplink 只带 id 时用于复核真实名称 / 版本，无 id 时按书名号名称反查）。
+// 同一关键词会命中多个同名专家，调用方必须按 expert_id 精确落位后再使用。
+func (c *Client) MarketExpertSearch(a *auth.Auth, keyword string) ([]MarketExpert, error) {
+	body := map[string]any{"page": 1, "page_size": 50, "keyword": keyword, "expert_type": "agent"}
+	return c.marketExpertQuery(a, body)
+}
+
+// marketExpertQuery 专家市场查询的公共实现（list / search 共用一套头与信封解析）。
+func (c *Client) marketExpertQuery(a *auth.Auth, body map[string]any) ([]MarketExpert, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err

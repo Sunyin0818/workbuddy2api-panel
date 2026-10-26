@@ -13,10 +13,13 @@
 //     （template_used / playbook_prompt_send / wbx_design_canvas_*），纯 API 可点亮（三账号实测）
 //   - expert_5 / Expert_team_use_3：真实专家列表 + 召唤链 + 真实 chat（服务端 requestId）
 //   - expert_actual_use（三账号实测）
+//   - Expert_lighthouse / expert_use_* / WorkBuddy_Valorant：「点名专家」族——召唤链 +
+//     真实对话 + expert_actual_use(mode=LOCAL)；expert_use_* 随活动下发，专家 id 从
+//     jump_url 解析，市场搜索校正，固定参数兜底
 //   - Hp_Appearance：appearance/set + appearance_skin_apply 事件（两账号实测）
 //
 // 仍未破解：skill_1（疑似要求真实 Skill 工具调用）。
-// 不做：Expert_lighthouse（需真实连接器授权）、Expert_Philanthropy（真实捐款）。
+// 不做：Expert_Philanthropy（真实捐款）。
 //
 // 所有动作幂等：已 claimed/已达标的任务直接跳过，不重复消耗上游配额。
 package panel
@@ -29,6 +32,8 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -129,6 +134,34 @@ var autoActions = []autoAction{
 		Desc:     "真实轻量云专家召唤+使用链（chat 链带 has_expert，已验证：两账号点亮）",
 		run:      runExpertLighthouse,
 	},
+	// 「点名专家」任务（2026-10-19~23 新增）：判据与 Expert_lighthouse 同源——
+	// 要求 expert_actual_use 的 id 等于任务点名的那位专家。任务码随活动下发，
+	// 这里只登记当前这批；未知 expert_use_* 由 autoActionFor 前缀通配 + jump_url 解析兜住。
+	{
+		TaskCode: "WorkBuddy_Valorant",
+		Desc:     "「无畏契约拼豆专家」召唤+真实对话（截止 11-15，+100c+5e）",
+		run:      runNamedExpertUseFor("WorkBuddy_Valorant"),
+	},
+	{
+		TaskCode: "expert_use_maidehao",
+		Desc:     "「中国电商运营专家」召唤+真实对话（截止 11-20，+50c+5e）",
+		run:      runNamedExpertUseFor("expert_use_maidehao"),
+	},
+	{
+		TaskCode: "expert_use_douyinyin",
+		Desc:     "「抖音策略师」召唤+真实对话（截止 11-20，+50c+5e）",
+		run:      runNamedExpertUseFor("expert_use_douyinyin"),
+	},
+	{
+		TaskCode: "expert_use_shangjia_xuanchuan",
+		Desc:     "「商家宣传页与海报设计师」召唤+真实对话（截止 11-20，+50c+5e）",
+		run:      runNamedExpertUseFor("expert_use_shangjia_xuanchuan"),
+	},
+	{
+		TaskCode: "expert_use_bowangwang",
+		Desc:     "「直播电商教练」召唤+真实对话（截止 11-20，+50c+5e）",
+		run:      runNamedExpertUseFor("expert_use_bowangwang"),
+	},
 	{
 		TaskCode: "black_cat",
 		Desc:     "夜猫子：23:00–08:00 窗口内 glm-5.2 对话补足（窗口外提示稍后再试）",
@@ -178,11 +211,62 @@ var autoActions = []autoAction{
 }
 
 // autoActionFor 查任务对应的动作；无则返回 nil（不可自动化）。
+//
+// expert_use_* 是随活动下发的任务码，静态表不可能预先登记：前缀命中即按
+// runNamedExpertUse 动态构造动作（专家 id 从任务 jump_url 解析）。
 func autoActionFor(code string) *autoAction {
+	code = strings.TrimSpace(code)
 	for i := range autoActions {
-		if autoActions[i].TaskCode == strings.TrimSpace(code) {
+		if autoActions[i].TaskCode == code {
 			return &autoActions[i]
 		}
+	}
+	if strings.HasPrefix(code, "expert_use_") {
+		act := dynamicNamedExpertAction(code)
+		return &act
+	}
+	return nil
+}
+
+// dynamicNamedExpertAction 构造「点名专家」任务的按需动作（不进入静态表，避免
+// 把随活动变化的码写死；TaskCode 仍为真实码，回读 / 领奖口径不变）。
+func dynamicNamedExpertAction(code string) autoAction {
+	return autoAction{
+		TaskCode: code,
+		Desc:     "点名专家召唤+真实对话（jump_url 解析专家 id，自动领奖）",
+		run:      runNamedExpertUseFor(code),
+	}
+}
+
+// mergeNamedExpertActions 在静态动作表后追加本账号实际下发的「点名专家」动态任务。
+// 去重（静态表已登记的码不重复）、跳过空码与其它任务；动态项排最后——它们都会触发
+// 一次真实对话，放在依赖链之后执行。
+func mergeNamedExpertActions(base []autoAction, tasks []upstream.Task) []autoAction {
+	acts := append([]autoAction(nil), base...)
+	known := make(map[string]bool, len(acts))
+	for i := range acts {
+		known[acts[i].TaskCode] = true
+	}
+	for _, t := range tasks {
+		code := strings.TrimSpace(t.TaskCode)
+		if code == "" || known[code] || !isNamedExpertTask(code) {
+			continue
+		}
+		known[code] = true
+		acts = append(acts, dynamicNamedExpertAction(code))
+	}
+	return acts
+}
+
+// autoActionForTask 结合任务对象做更宽泛的判定：静态/前缀都没命中时，若任务的
+// jump_url 里带 expertId，同样按点名专家链路处理（未来新增码零改动可跑）。
+func (p *Panel) autoActionForTask(a *auth.Auth, code string) *autoAction {
+	if act := autoActionFor(code); act != nil {
+		return act
+	}
+	if t, err := p.taskByCode(a, code); err == nil && t != nil && expertIDFromJump(t.JumpURL) != "" {
+		act := dynamicNamedExpertAction(code)
+		return &act
 	}
 	return nil
 }
@@ -647,7 +731,7 @@ func (p *Panel) accountTaskAuto(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "task_code required")
 		return
 	}
-	act := autoActionFor(body.TaskCode)
+	act := p.autoActionForTask(a, body.TaskCode)
 	if act == nil {
 		writeErr(w, http.StatusNotImplemented,
 			"该任务需要客户端内交互（无对应接口），无法自动完成；请按任务说明在官方客户端操作")
@@ -975,30 +1059,212 @@ func runExpertLighthouse(p *Panel, a *auth.Auth) (string, error) {
 			}
 		}
 	}
-	if err := p.cfg.Upstream.ReportDesktopEvent(a, upstream.DesktopExpertSummonSequence(lh)...); err != nil {
-		return "", fmt.Errorf("召唤链: %w", err)
+	if err := p.runExpertSummonChain(a, lh); err != nil {
+		return "", err
 	}
-	conv, req, err := p.cfg.Upstream.DesktopChatWithExpert(a, lhID)
+	return "已上报轻量云专家召唤+使用链（真实对话 requestId）", nil
+}
+
+// namedExpertCodes 不以 expert_use_ 前缀下发、但判据同样是「点名某位专家」的任务码。
+var namedExpertCodes = map[string]bool{
+	"WorkBuddy_Valorant": true, // 体验「无畏契约拼豆专家」（截止 2026-11-15）
+}
+
+// isNamedExpertTask 报告任务是否属于「点名专家」族（expert_use_* / namedExpertCodes）。
+func isNamedExpertTask(code string) bool {
+	code = strings.TrimSpace(code)
+	return strings.HasPrefix(code, "expert_use_") || namedExpertCodes[code]
+}
+
+// expertExperienceTasks 当前活动的「体验「X」专家」任务固定参数（+50c+5e 四条，
+// 截止 11-20；Valorant +100c+5e，截止 11-15）。
+//
+// 专家 id 取自任务自身 jump_url（PC deeplink `experts?expertId=ex_…`）并与专家市场
+// 真实条目一一对应（2026-10-23 用 CN 账号核对）。DisplayNameZH 是专家**昵称**
+// （卖得好/斗音音/播旺旺），ProfessionZH 才是任务标题里的职业名——判据事件里
+// name 取昵称、expertTitle 取职业名，两者都参与服务端校验，不能互换。
+//
+// 这里只是「市场查询失败 / 任务无 jump_url」时的兜底；运行时优先按 jump_url 与
+// 市场搜索结果校正（见 resolveNamedExpert）。
+var expertExperienceTasks = map[string]upstream.MarketExpert{
+	"WorkBuddy_Valorant": {
+		ExpertID: "ex_xQHHD1u5Jkua", ExpertType: "agent",
+		DisplayNameZH: "无畏契约拼豆专家", ProfessionZH: "无畏契约拼豆专家", Version: "1.2.1",
+	},
+	"expert_use_maidehao": {
+		ExpertID: "ex_GDl31WahyIH0", ExpertType: "agent",
+		DisplayNameZH: "卖得好", ProfessionZH: "中国电商运营专家", Version: "1.0.1",
+	},
+	"expert_use_douyinyin": {
+		ExpertID: "ex_FbY5nlWTqDod", ExpertType: "agent",
+		DisplayNameZH: "斗音音", ProfessionZH: "抖音策略师", Version: "1.0.2",
+	},
+	"expert_use_shangjia_xuanchuan": {
+		ExpertID: "ex_Weo3x2EZuSDm", ExpertType: "agent",
+		DisplayNameZH: "商家宣传设计师", ProfessionZH: "商家宣传页与海报设计师", Version: "1.6.0",
+	},
+	"expert_use_bowangwang": {
+		ExpertID: "ex_WZY136wV5aMt", ExpertType: "agent",
+		DisplayNameZH: "播旺旺", ProfessionZH: "直播电商教练", Version: "1.0.2",
+	},
+}
+
+var (
+	reExpertIDInJump = regexp.MustCompile(`expertId=([A-Za-z0-9_]+)`)
+	reQuotedName     = regexp.MustCompile(`「([^」]+)」`)
+)
+
+// expertIDFromJump 从任务 jump_url 解出 expertId。
+// 形态：https://www.workbuddy.cn/work/launch/?deeplink=workbuddy%3A%2F%2Fexperts%3FexpertId%3Dex_xxx%26...
+// 先整体 URL 解码再取 expertId= 后的 id；无该参数（如 WorkBuddy_Valorant）返回 ""。
+func expertIDFromJump(jump string) string {
+	if strings.TrimSpace(jump) == "" {
+		return ""
+	}
+	if decoded, err := url.QueryUnescape(jump); err == nil {
+		jump = decoded
+	}
+	if m := reExpertIDInJump.FindStringSubmatch(jump); len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// quotedTitleName 取任务标题书名号里的专家名（「体验「抖音策略师」」→ 抖音策略师）。
+// 无书名号返回 ""（例如早期标题形态），调用方回落固定参数。
+func quotedTitleName(title string) string {
+	if m := reQuotedName.FindStringSubmatch(title); len(m) == 2 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+// runNamedExpertUseFor 把任务码绑进 autoAction.run 的函数签名（run 只收 Panel/Auth）。
+func runNamedExpertUseFor(code string) func(*Panel, *auth.Auth) (string, error) {
+	return func(p *Panel, a *auth.Auth) (string, error) {
+		return p.runNamedExpertUse(a, code)
+	}
+}
+
+// runNamedExpertUse 完成「点名专家」任务（expert_use_* / WorkBuddy_Valorant 等）。
+//
+// 判据与 Expert_lighthouse 同源：expert_actual_use 的 id 必须等于任务点名的那位专家，
+// requestId 必须是真实桌面 chat 的服务端 id。步骤：
+//  1. 读任务：无此任务 / 已领取 / 已达标 → 直接返回，不浪费配额；
+//  2. 定专家：jump_url 的 expertId 优先，其次内置参数，最后标题书名号；
+//     再用专家市场 keyword 搜索 / 推荐榜按 expert_id 精确校正名称与版本；
+//  3. 召唤链 → 真实对话 → chat 事件链 + expert_actual_use(mode=LOCAL) 上报。
+//
+// 领奖由调用方（accountTaskAuto / runAutoAll）回读达标后统一执行，避免重复领取。
+func (p *Panel) runNamedExpertUse(a *auth.Auth, code string) (string, error) {
+	code = strings.TrimSpace(code)
+	t, err := p.taskByCode(a, code)
 	if err != nil {
-		return "", fmt.Errorf("真实对话: %w", err)
+		return "", err
 	}
-	events := upstream.DesktopChatSequence(conv, req, "msg-"+req[len(req)-8:], "fast-model", "fast-model")
+	if t == nil {
+		return "该账号无此任务（活动可能已结束）", nil
+	}
+	if t.Claimed {
+		return "已领取", nil
+	}
+	if t.Target > 0 && t.Current >= t.Target {
+		return fmt.Sprintf("已达标（%d/%d），无需重跑", t.Current, t.Target), nil
+	}
+	e, err := p.resolveNamedExpert(a, expertExperienceTasks[code], t.JumpURL, t.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := p.runExpertSummonChain(a, e); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("已对「%s」(%s) 完成召唤+真实对话", e.DisplayNameZH, e.ExpertID), nil
+}
+
+// resolveNamedExpert 定位任务点名的专家：优先用 jump_url 的 expertId（任务绑定，
+// 权威），其次内置固定参数；再按 expert_id 在市场搜索结果 / 推荐榜里精确落位，
+// 用服务端返回的名称与版本校正。市场不可达时用任务/内置参数兜底（名称不全才报错）。
+func (p *Panel) resolveNamedExpert(a *auth.Auth, spec upstream.MarketExpert, jump, title string) (upstream.MarketExpert, error) {
+	e := spec
+	if id := expertIDFromJump(jump); id != "" {
+		e.ExpertID = id
+	}
+	if name := quotedTitleName(title); name != "" && e.DisplayNameZH == "" {
+		e.DisplayNameZH = name
+	}
+	if e.ExpertType == "" {
+		e.ExpertType = "agent"
+	}
+	if e.ExpertID == "" {
+		return upstream.MarketExpert{}, fmt.Errorf("任务未绑定专家 id（jump_url=%q），无法确定判据目标", jump)
+	}
+	// 搜索词优先用任务标题里的职业名（同一关键词会命中多个同名专家，最后仍按 id 落位）。
+	keyword := e.ProfessionZH
+	if keyword == "" {
+		keyword = e.DisplayNameZH
+	}
+	if keyword == "" {
+		keyword = e.ExpertID
+	}
+	if list, err := p.cfg.Upstream.MarketExpertSearch(a, keyword); err == nil {
+		if m, ok := pickExpertByID(list, e.ExpertID); ok {
+			return m, nil
+		}
+	}
+	if list, err := p.cfg.Upstream.MarketExpertList(a, "agent"); err == nil {
+		if m, ok := pickExpertByID(list, e.ExpertID); ok {
+			return m, nil
+		}
+	}
+	// 市场查询失败 / 未命中：只要名称齐全就按内置参数继续（服务端仍会校验 id 真实性）。
+	if e.DisplayNameZH == "" || e.ProfessionZH == "" {
+		return upstream.MarketExpert{}, fmt.Errorf("专家市场未找到 %s，且任务未提供完整名称，无法上报", e.ExpertID)
+	}
+	return e, nil
+}
+
+// pickExpertByID 在专家市场结果里按 expert_id 精确取一条（不取首条：同名专家很多）。
+func pickExpertByID(list []upstream.MarketExpert, id string) (upstream.MarketExpert, bool) {
+	for _, e := range list {
+		if e.ExpertID == id {
+			return e, true
+		}
+	}
+	return upstream.MarketExpert{}, false
+}
+
+// runExpertSummonChain「召唤专家 + 真实对话 + expert_actual_use」公共实现。
+// 判据口径固定为 Expert_lighthouse / 点名专家族：mode=LOCAL、type 为空、cost=0，
+// requestId 用真实 chat 的服务端 id（自造 id 上游不计数）。
+func (p *Panel) runExpertSummonChain(a *auth.Auth, e upstream.MarketExpert) error {
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, upstream.DesktopExpertSummonSequence(e)...); err != nil {
+		return fmt.Errorf("召唤链: %w", err)
+	}
+	conv, req, err := p.cfg.Upstream.DesktopChatWithExpert(a, e.ExpertID)
+	if err != nil {
+		return fmt.Errorf("真实对话: %w", err)
+	}
+	tail := req
+	if len(tail) > 8 {
+		tail = tail[len(tail)-8:]
+	}
+	events := upstream.DesktopChatSequence(conv, req, "msg-"+tail, "fast-model", "fast-model")
 	for _, ev := range events {
 		if ev["eventCode"] == "agent_task_created" {
 			ev["has_expert"] = true
-			ev["expert_id"] = lh.ExpertID
-			ev["expert_name"] = lh.DisplayNameZH
+			ev["expert_id"] = e.ExpertID
+			ev["expert_name"] = e.DisplayNameZH
 			ev["expert_industry_id"] = ""
 		}
 	}
-	events = append(events, upstream.DesktopExpertActualUseLocal(lh, conv, req))
-	// 对齐真实样本细节：轻量云专家 actual_use 的 type 为空、cost=0。
+	events = append(events, upstream.DesktopExpertActualUseLocal(e, conv, req))
+	// 对齐真实样本细节：专家页直连召唤的 actual_use type 为空、cost=0。
 	events[len(events)-1]["type"] = ""
 	events[len(events)-1]["cost"] = 0
 	if err := p.cfg.Upstream.ReportDesktopEvent(a, events...); err != nil {
-		return "", fmt.Errorf("使用事件: %w", err)
+		return fmt.Errorf("使用事件: %w", err)
 	}
-	return "已上报轻量云专家召唤+使用链（真实对话 requestId）", nil
+	return nil
 }
 
 // runAppearance 完成 Hp_Appearance（换主题）。
@@ -1133,7 +1399,11 @@ func (p *Panel) runAutoAll(a *auth.Auth) []map[string]any {
 	var out []map[string]any
 
 	// 阶段 0：批量接受尚未接受的任务（失败不阻塞——行为事件才是进度唯一判据）。
+	// allTasks 同时供「点名专家」动态任务展开使用：expert_use_* 随活动下发，
+	// 静态 autoActions 表不可能预先登记。
+	var allTasks []upstream.Task
 	if tasks, err := p.cfg.Upstream.ListTasks(a); err == nil {
+		allTasks = tasks
 		var codes []string
 		for _, t := range tasks {
 			if !t.Claimed && !t.Locked && t.AcceptStatus != "accepted" && t.AcceptStatus != "completed" {
@@ -1180,7 +1450,10 @@ func (p *Panel) runAutoAll(a *auth.Auth) []map[string]any {
 		}
 	}
 
-	for _, act := range autoActions {
+	// 静态表 + 本账号实际下发的「点名专家」动态任务（去重，动态项排在最后）。
+	acts := mergeNamedExpertActions(autoActions, allTasks)
+
+	for _, act := range acts {
 		item := map[string]any{"task_code": act.TaskCode, "desc": act.Desc}
 		before, err := p.taskByCode(a, act.TaskCode)
 		if err != nil {

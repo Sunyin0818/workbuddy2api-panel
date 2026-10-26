@@ -1614,6 +1614,11 @@ const AUTO_TASKS = {
   'Hp_Appearance': '设置主题 API + 皮肤生效事件（两账号实测点亮）',
   'black_cat': '夜猫子：23:00–08:00 窗口内 glm-5.2 对话补足（窗口外提示等 23 点排程）',
   'Expert_lighthouse': '真实轻量云专家召唤+使用链（真实对话 requestId，两账号实测点亮）',
+  'WorkBuddy_Valorant': '「无畏契约拼豆专家」召唤+真实对话（截止 11-15，+100c+5e）',
+  'expert_use_maidehao': '「中国电商运营专家」召唤+真实对话（截止 11-20，+50c+5e）',
+  'expert_use_douyinyin': '「抖音策略师」召唤+真实对话（截止 11-20，+50c+5e）',
+  'expert_use_shangjia_xuanchuan': '「商家宣传页与海报设计师」召唤+真实对话（截止 11-20，+50c+5e）',
+  'expert_use_bowangwang': '「直播电商教练」召唤+真实对话（截止 11-20，+50c+5e）',
   'skill_1': '真实对话 + skill_info 技能加载事件（实测点亮）',
   'school_season': '校园日（小程序口径）：accept → mini 对话+activityId 上报 → 领奖（+100c+5e）',
   'Sequential_Tasks_1': '小程序首对话（小程序口径）：accept → mini 对话上报 → 领奖（+100c+5e）',
@@ -1624,6 +1629,14 @@ const AUTO_TASKS = {
   'Sequential_Tasks_6': '小程序十次对话（预留）：accept → mini 对话上报 ×target（自动补差额）→ 领奖',
   'Sequential_Tasks_7': '体验灵感功能（预留，疑 PC 口径）：accept → 灵感事件组（PC+mp 双形态）→ 领奖（判据待解锁验证）'
 };
+
+// 点名专家族：expert_use_* 随活动下发（无法静态列举），另加非前缀命中的固定码。
+// 与服务端 autoActionFor / isNamedExpertTask 同口径：命中即渲染「一键完成」。
+const NAMED_EXPERT_CODES = { 'WorkBuddy_Valorant': 1 };
+function isNamedExpertTask(code) {
+  return /^expert_use_/.test(String(code || '')) || !!NAMED_EXPERT_CODES[code];
+}
+const NAMED_EXPERT_DESC = '点名专家召唤+真实对话（自动解析任务专家 id，回读达标后领奖）';
 
 function openTasks(uid) {
   taskUID = uid;
@@ -1701,9 +1714,12 @@ async function loadTasks() {
         : t.locked ? '<span class="tag mute">未解锁</span>'
         : t.accept_status === 'accepted' ? '<span class="tag mute">进行中</span>'
         : '<span class="tag mute">未接受</span>';
+      // 一键完成按钮：静态表命中，或属于随活动下发的「点名专家」族。
+      const autoDesc = AUTO_TASKS[t.task_code]
+        || (isNamedExpertTask(t.task_code) ? NAMED_EXPERT_DESC : '');
       const acted = t.claimed || t.locked ? ''
         : t.claimable ? '<button class="xs primary" data-t="claim" data-c="' + esc(t.task_code) + '">领取</button>'
-        : AUTO_TASKS[t.task_code] ? '<button class="xs primary" data-t="auto" data-c="' + esc(t.task_code) + '" title="' + esc(AUTO_TASKS[t.task_code]) + '">一键完成</button>'
+        : autoDesc ? '<button class="xs primary" data-t="auto" data-c="' + esc(t.task_code) + '" title="' + esc(autoDesc) + '">一键完成</button>'
         : t.accept_status === 'accepted' ? ''
         : '<button class="xs" data-t="accept" data-c="' + esc(t.task_code) + '">接受</button>';
       // 操作指引（description/task_desc）挂 title 提示：如何完成交给用户看
