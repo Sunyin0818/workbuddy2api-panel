@@ -1374,6 +1374,94 @@ process.stdout.write(JSON.stringify({fresh: fresh, folded: folded, unfolded: unf
 	}
 }
 
+// 主题必须真正跟随系统：系统偏好变化时通过 MediaQueryList 的 change 立刻重绘（不刷新），
+// 且三态循环能回到 auto。回归点（真实反馈「跟随系统坏了」）：
+//   - change 监听曾挂在 window 上 —— MediaQueryList 不向 window 派发，系统切明暗页面不动；
+//   - 点击只有 light/dark 两态，点过一次就再也回不到「跟随系统」，标题却写着三态。
+// 无 node 环境跳过。
+func TestAppJSThemeFollow(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; theme follow test skipped")
+	}
+	script := `const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const start = src.indexOf('let theme = localStorage.getItem(LS_THEME)');
+const endMarker = 'applyTheme();';
+const end = src.lastIndexOf(endMarker);
+if (start < 0 || end < 0) throw new Error('theme block not found');
+const slice = src.slice(start, end + endMarker.length);
+function boot(stored, systemLight) {
+  const store = Object.assign({}, stored);
+  const els = {};
+  const el = id => els[id] || (els[id] = { innerHTML: '', title: '' });
+  const doc = { getElementById: el, documentElement: { dataset: {} } };
+  let listener = null;
+  const mq = {
+    matches: !!systemLight,
+    addEventListener(type, fn) { if (type === 'change') listener = fn; },
+  };
+  const ctx = {
+    LS_THEME: 'wb2api.theme',
+    localStorage: {
+      getItem: k => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+    },
+    matchMedia: () => mq,
+    document: doc,
+  };
+  vm.createContext(ctx);
+  vm.runInContext(slice, ctx, { filename: 'theme-slice.js' });
+  return {
+    mq,
+    fire: () => { if (!listener) throw new Error('no change listener on MediaQueryList'); listener(); },
+    click: () => { els.btnTheme.onclick(); },
+    state: () => ({
+      theme: doc.documentElement.dataset.theme,
+      stored: (('wb2api.theme' in store) ? store['wb2api.theme'] : null),
+    }),
+  };
+}
+const out = {};
+const a = boot(null, false);                        // 首次访问，系统深色
+out.fresh = a.state();
+a.mq.matches = true; a.fire();                      // 系统切成浅色：必须立即跟随
+out.followLight = a.state();
+a.click(); out.cycleLight = a.state();
+a.click(); out.cycleDark = a.state();
+a.click(); out.cycleAuto = a.state();
+a.mq.matches = false; a.fire();                     // 回到 auto 后继续跟随系统
+out.followDark = a.state();
+const b = boot({ 'wb2api.theme': 'dark' }, true);   // 显式锁深色，系统是浅色
+out.pinned = b.state();
+b.mq.matches = false; b.fire();
+out.pinnedAfterFlip = b.state();
+const c = boot({ 'wb2api.theme': 'sepia' }, false); // localStorage 脏值回落跟随系统
+out.dirty = c.state();
+process.stdout.write(JSON.stringify(out));`
+	f, err := os.CreateTemp(t.TempDir(), "theme-follow-*.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("theme follow node test failed: %v\n%s", err, out)
+	}
+	const want = `{"fresh":{"theme":"dark","stored":null},"followLight":{"theme":"light","stored":null},` +
+		`"cycleLight":{"theme":"light","stored":"light"},"cycleDark":{"theme":"dark","stored":"dark"},` +
+		`"cycleAuto":{"theme":"light","stored":"auto"},"followDark":{"theme":"dark","stored":"auto"},` +
+		`"pinned":{"theme":"dark","stored":"dark"},"pinnedAfterFlip":{"theme":"dark","stored":"dark"},` +
+		`"dirty":{"theme":"dark","stored":"sepia"}}`
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("theme follow=%s\nwant %s", got, want)
+	}
+}
+
 // 备注与折叠的接线齐备性：少一个 id 或漏一个 localStorage 键，表现为「按钮点了没反应」，
 // 而 Go 编译、JS 语法检查、顶层冒烟都发现不了（脚本能正常跑，只是挂不上）。
 func TestPanelRemarkAndFoldWiring(t *testing.T) {

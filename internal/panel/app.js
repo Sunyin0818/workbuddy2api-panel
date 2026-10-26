@@ -22,21 +22,37 @@ let reqRangeState = null; // 请求记录的时间范围（用量页的见 trang
 const $ = id => document.getElementById(id);
 
 /* ── 主题 ─────────────────────────────────────────────────────────── */
-/* 两态翻转（浅/深），首次访问跟随系统偏好；点击总是切换可见外观，符合直觉。 */
+/* 三态循环：跟随系统 → 浅色 → 深色 → 跟随系统（与按钮 title 口径一致）。
+   auto 解析 prefers-color-scheme，并把 change 监听挂在**媒体查询对象**上：
+   MediaQueryList 的 change 不会派发到 window，早先挂在 window 上的监听永远不触发，
+   系统切明暗时页面纹丝不动（只有刷新才生效），就是「跟随系统坏了」的直接原因。
+   反方向同理：两态翻转永远回不到 auto，用户点过一次就再也无法跟随系统。 */
+const THEME_MODES = ['auto', 'light', 'dark'];
+const THEME_LABEL = { auto: '跟随系统', light: '浅色', dark: '深色' };
+const THEME_ICON = {
+  auto: '<circle cx="8" cy="8" r="5"/><path d="M8 3a5 5 0 0 0 0 10z" fill="currentColor" stroke="none"/>',
+  light: '<circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/>',
+  dark: '<path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/>',
+};
+const MQ_LIGHT = matchMedia('(prefers-color-scheme: light)');
+if (THEME_MODES.indexOf(theme) < 0) theme = 'auto';    // localStorage 脏值/旧值回落跟随系统
 function effTheme() {
-  return theme === 'auto' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
+  return theme === 'auto' ? (MQ_LIGHT.matches ? 'light' : 'dark') : theme;
+}
+function nextTheme() {
+  return THEME_MODES[(THEME_MODES.indexOf(theme) + 1) % THEME_MODES.length];
 }
 function applyTheme() {
   const eff = effTheme();
   document.documentElement.dataset.theme = eff;
-  $('icoTheme').innerHTML = eff === 'light'
-    ? '<circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/>'
-    : '<path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8z"/>';
-  $('btnTheme').title = eff === 'light' ? '切换到深色' : '切换到浅色';
+  $('icoTheme').innerHTML = THEME_ICON[theme];
+  $('btnTheme').title =
+    `主题：${THEME_LABEL[theme]}（当前${THEME_LABEL[eff]}），点击切换为${THEME_LABEL[nextTheme()]}`;
 }
-addEventListener('change', applyTheme);
+if (MQ_LIGHT.addEventListener) MQ_LIGHT.addEventListener('change', applyTheme);
+else if (MQ_LIGHT.addListener) MQ_LIGHT.addListener(applyTheme);   // Safari < 14 兜底
 $('btnTheme').onclick = () => {
-  theme = effTheme() === 'light' ? 'dark' : 'light';
+  theme = nextTheme();
   localStorage.setItem(LS_THEME, theme);
   applyTheme();
 };
